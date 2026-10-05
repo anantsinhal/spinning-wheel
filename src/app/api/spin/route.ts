@@ -4,8 +4,13 @@ import { getPrizes } from "@/lib/prize-store";
 
 export const dynamic = "force-dynamic";
 
-function selectPrize() {
-  const prizes = getPrizes();
+async function selectPrize() {
+  const prizes = await getPrizes();
+
+  if (!prizes.length) {
+    throw new Error("No prizes are configured.");
+  }
+
   let draw: number;
   try {
     draw = randomInt(0, 10_000) / 100;
@@ -25,7 +30,7 @@ function selectPrize() {
 
 export async function POST() {
   try {
-    const result = selectPrize();
+    const result = await selectPrize();
     return NextResponse.json({ success: true, result, hasVoucher: false });
   } catch (error) {
     console.error("Spin failed", error);
