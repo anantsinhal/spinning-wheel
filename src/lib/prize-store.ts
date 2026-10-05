@@ -1,3 +1,5 @@
+import { createClient } from "@supabase/supabase-js";
+
 export type WheelPrize = {
   id: string;
   name: string;
@@ -62,16 +64,72 @@ export const defaultPrizes: WheelPrize[] = [
   },
 ];
 
-// Global in-memory storage for wheel components & prizes
-let currentPrizes: WheelPrize[] = [...defaultPrizes];
+let localPrizes: WheelPrize[] = [...defaultPrizes];
 
-export function getPrizes(): WheelPrize[] {
-  return currentPrizes;
+function getSupabaseAdmin() {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key =
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) return null;
+
+  return createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
 }
 
-export function setPrizes(newPrizes: WheelPrize[]): void {
-  currentPrizes = newPrizes.map((p) => ({
+export async function getPrizes(): Promise<WheelPrize[]> {
+  const supabase = getSupabaseAdmin();
+
+  // Local fallback keeps development working before Supabase is configured.
+  if (!supabase) return localPrizes;
+
+  const { data, error } = await supabase
+    .from("wheel_config")
+    .select("prizes")
+    .eq("id", "main")
+    .maybeSingle();
+
+  if (error) {
+    console.error("Failed to load wheel configuration:", error.message);
+    return localPrizes;
+  }
+
+  if (!data?.prizes || !Array.isArray(data.prizes)) {
+    return localPrizes;
+  }
+
+  localPrizes = data.prizes as WheelPrize[];
+  return localPrizes;
+}
+
+export async function setPrizes(newPrizes: WheelPrize[]): Promise<WheelPrize[]> {
+  const normalized = newPrizes.map((p) => ({
     ...p,
     probability: Number(p.probability) || 0,
   }));
+
+  localPrizes = normalized;
+
+  const supabase = getSupabaseAdmin();
+  if (!supabase) return localPrizes;
+
+  const { error } = await supabase
+    .from("wheel_config")
+    .upsert(
+      {
+        id: "main",
+        prizes: normalized,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "id" }
+    );
+
+  if (error) {
+    console.error("Failed to save wheel configuration:", error.message);
+    throw new Error("Could not save the wheel. Check the database configuration.");
+  }
+
+  return normalized;
 }
